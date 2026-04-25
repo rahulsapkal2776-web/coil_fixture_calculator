@@ -32,13 +32,6 @@ coil_entries = {}
 cap_entries = {}
 fixture_entries = {}
 
-# Practical pulse-current baseline from shop experience:
-# 10 kA works with 12 SWG copper wire in pulse duty.
-BASELINE_CURRENT_A = 10_000
-SWG_12_DIAMETER_MM = 2.642
-SWG_12_AREA_MM2 = math.pi * (SWG_12_DIAMETER_MM / 2) ** 2
-
-
 def set_value(entry_dict, key, value):
     entry_dict[key].delete(0, tk.END)
     entry_dict[key].insert(0, str(value))
@@ -51,13 +44,46 @@ def get_float(entry_dict, key, default=0):
         return default
 
 
-def calculate_conductor_sizing(peak_current_a):
-    # Scale copper area from practical baseline so heat loading stays similar.
-    required_area_mm2 = (peak_current_a / BASELINE_CURRENT_A) * SWG_12_AREA_MM2
-    eq_parallel_12swg = max(1, math.ceil(required_area_mm2 / SWG_12_AREA_MM2))
-    achieved_area_mm2 = eq_parallel_12swg * SWG_12_AREA_MM2
-    pulse_current_density = peak_current_a / achieved_area_mm2 if achieved_area_mm2 > 0 else 0
-    return required_area_mm2, eq_parallel_12swg, pulse_current_density
+def suggest_conductor_size(current_ka):
+    current_a = current_ka * 1000
+
+    # Base practical rule:
+    # 100A pulse = 20 SWG copper
+    base_current = 100
+    base_area = 0.518  # mm² (20 SWG)
+
+    required_area = (current_a / base_current) * base_area
+
+    swg_table = [
+        ("20 SWG", 0.518),
+        ("18 SWG", 0.823),
+        ("16 SWG", 1.31),
+        ("14 SWG", 2.08),
+        ("12 SWG", 3.31),
+        ("10 SWG", 5.26),
+        ("8 SWG", 8.37),
+        ("6 SWG", 13.30),
+        ("4 SWG", 21.15),
+        ("2 SWG", 33.63),
+        ("0 SWG", 53.50),
+    ]
+
+    # Single wire option
+    for swg, area in swg_table:
+        if area >= required_area:
+            return f"{swg} Cu Wire / {round(area, 2)} mm²", required_area, area
+
+    # Multi wire / strip options
+    if required_area <= 80:
+        return f"Copper Strip 25 x {round(required_area / 25, 2)} mm", required_area, required_area
+    if required_area <= 150:
+        return f"Copper Strip 40 x {round(required_area / 40, 2)} mm", required_area, required_area
+
+    return (
+        f"2 Parallel Copper Strips / Total {round(required_area, 1)} mm²",
+        required_area,
+        required_area,
+    )
 
 
 def calculate_design():
@@ -107,9 +133,8 @@ def calculate_design():
 
         peak_current_a = current_ka * 1000
         ampere_turns = peak_current_a * turns
-        required_area_mm2, eq_parallel_12swg, pulse_current_density = calculate_conductor_sizing(
-            peak_current_a
-        )
+        wire_size_text, required_area_mm2, selected_area_mm2 = suggest_conductor_size(current_ka)
+        pulse_current_density = peak_current_a / selected_area_mm2 if selected_area_mm2 > 0 else 0
 
         # Basic fixture geometry
         pole_pitch = (math.pi * od) / poles
@@ -121,19 +146,13 @@ def calculate_design():
 
         # Output fill
         set_value(coil_entries, "Recommended Turns", turns)
-        set_value(
-            coil_entries,
-            "Wire / Strip Size",
-            (
-                f"{round(required_area_mm2, 2)} mm² copper "
-                f"(~{eq_parallel_12swg} x 12 SWG in parallel)"
-            ),
-        )
+        set_value(coil_entries, "Wire / Strip Size", wire_size_text)
         set_value(coil_entries, "Resistance (mΩ)", "To be calculated")
         set_value(coil_entries, "Inductance (µH)", "To be calculated")
         set_value(coil_entries, "Peak Current (kA)", current_ka)
         set_value(coil_entries, "Pulse Width (ms)", "To be tested")
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
+        set_value(coil_entries, "Required Conductor Area (mm²)", round(required_area_mm2, 2))
         set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
 
         set_value(cap_entries, "Required Energy (J)", round(required_energy, 2))
@@ -305,6 +324,7 @@ coil_fields = [
     "Peak Current (kA)",
     "Pulse Width (ms)",
     "Ampere Turns",
+    "Required Conductor Area (mm²)",
     "Pulse Current Density (A/mm²)",
 ]
 
