@@ -96,6 +96,9 @@ def calculate_design():
         voltage = get_float(machine_entries, "Max Voltage (V)")
         current_ka = get_float(machine_entries, "Max Current (kA)")
         cycle_time = get_float(machine_entries, "Cycle Time (sec)")
+        pulse_width_ms = get_float(machine_entries, "Pulse Width (ms)", 3.0)
+        shots_per_min = get_float(machine_entries, "Shots per Minute", 10.0)
+        cooling_factor = get_float(machine_entries, "Cooling Factor", 1.0)
         single_cap_uf = get_float(machine_entries, "Single Capacitor Value (µF)", 4700)
         single_cap_voltage = get_float(machine_entries, "Single Capacitor Voltage (V)", voltage)
 
@@ -109,6 +112,12 @@ def calculate_design():
             messagebox.showwarning(
                 "Input Missing",
                 "Please enter valid single capacitor value (µF) and voltage (V).",
+            )
+            return
+        if pulse_width_ms <= 0 or shots_per_min <= 0 or cooling_factor <= 0:
+            messagebox.showwarning(
+                "Input Missing",
+                "Please enter valid Pulse Width, Shots per Minute and Cooling Factor.",
             )
             return
 
@@ -133,8 +142,17 @@ def calculate_design():
 
         peak_current_a = current_ka * 1000
         ampere_turns = peak_current_a * turns
-        wire_size_text, required_area_mm2, selected_area_mm2 = suggest_conductor_size(current_ka)
+
+        # Duty-cycle based thermal correction
+        duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
+        duty_reference = 0.02  # 2% pulse-duty baseline
+        thermal_index = duty_fraction / max(cooling_factor, 0.1)
+        duty_cycle_correction = math.sqrt(max(thermal_index / duty_reference, 1.0))
+        corrected_current_ka = current_ka * duty_cycle_correction
+
+        wire_size_text, required_area_mm2, selected_area_mm2 = suggest_conductor_size(corrected_current_ka)
         pulse_current_density = peak_current_a / selected_area_mm2 if selected_area_mm2 > 0 else 0
+        copper_temp_rise_c = 35 * max(thermal_index / duty_reference, 0.2)
 
         # Basic fixture geometry
         pole_pitch = (math.pi * od) / poles
@@ -150,10 +168,14 @@ def calculate_design():
         set_value(coil_entries, "Resistance (mΩ)", "To be calculated")
         set_value(coil_entries, "Inductance (µH)", "To be calculated")
         set_value(coil_entries, "Peak Current (kA)", current_ka)
-        set_value(coil_entries, "Pulse Width (ms)", "To be tested")
+        set_value(coil_entries, "Pulse Width (ms)", round(pulse_width_ms, 2))
+        set_value(coil_entries, "Shots per Minute", round(shots_per_min, 2))
+        set_value(coil_entries, "Cooling Factor", round(cooling_factor, 2))
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
         set_value(coil_entries, "Required Conductor Area (mm²)", round(required_area_mm2, 2))
         set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
+        set_value(coil_entries, "Duty Cycle Correction", round(duty_cycle_correction, 2))
+        set_value(coil_entries, "Copper Temperature Rise (°C)", round(copper_temp_rise_c, 1))
 
         set_value(cap_entries, "Required Energy (J)", round(required_energy, 2))
         set_value(cap_entries, "Suggested Voltage (V)", round(voltage, 2))
@@ -293,6 +315,9 @@ machine_fields = [
     "Max Voltage (V)",
     "Max Current (kA)",
     "Cycle Time (sec)",
+    "Pulse Width (ms)",
+    "Shots per Minute",
+    "Cooling Factor",
     "Available Space (mm)",
     "Cooling Type",
     "Single Capacitor Value (µF)",
@@ -323,9 +348,13 @@ coil_fields = [
     "Inductance (µH)",
     "Peak Current (kA)",
     "Pulse Width (ms)",
+    "Shots per Minute",
+    "Cooling Factor",
     "Ampere Turns",
     "Required Conductor Area (mm²)",
     "Pulse Current Density (A/mm²)",
+    "Duty Cycle Correction",
+    "Copper Temperature Rise (°C)",
 ]
 
 for i, f in enumerate(coil_fields):
