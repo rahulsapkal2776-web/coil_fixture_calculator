@@ -5,7 +5,10 @@ from tkinter import messagebox, ttk
 root = tk.Tk()
 root.title("LNP ENTERPRISES - Magnetiser Design Software")
 root.geometry("1380x820")
+root.minsize(1100, 700)
 root.configure(bg="#e9edf2")
+root.grid_rowconfigure(1, weight=1)
+root.grid_columnconfigure(0, weight=1)
 
 # ===================== STYLE =====================
 style = ttk.Style()
@@ -163,7 +166,7 @@ def export_pdf():
 
 # ===================== HEADER =====================
 header = tk.Frame(root, bg="#003366", height=55)
-header.pack(fill="x")
+header.grid(row=0, column=0, sticky="ew")
 
 tk.Label(
     header,
@@ -173,9 +176,33 @@ tk.Label(
     font=("Segoe UI", 15, "bold"),
 ).pack(pady=12)
 
-# ===================== MAIN FRAME =====================
-main = tk.Frame(root, bg="#e9edf2")
-main.pack(fill="both", expand=True, padx=10, pady=10)
+# ===================== SCROLLABLE CONTENT =====================
+content_container = tk.Frame(root, bg="#e9edf2")
+content_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+content_container.grid_rowconfigure(0, weight=1)
+content_container.grid_columnconfigure(0, weight=1)
+
+content_canvas = tk.Canvas(content_container, bg="#e9edf2", highlightthickness=0)
+content_canvas.grid(row=0, column=0, sticky="nsew")
+
+vscroll = ttk.Scrollbar(content_container, orient="vertical", command=content_canvas.yview)
+vscroll.grid(row=0, column=1, sticky="ns")
+content_canvas.configure(yscrollcommand=vscroll.set)
+
+main = tk.Frame(content_canvas, bg="#e9edf2")
+main_window = content_canvas.create_window((0, 0), window=main, anchor="nw")
+
+
+def _on_main_configure(event):
+    content_canvas.configure(scrollregion=content_canvas.bbox("all"))
+
+
+def _on_canvas_configure(event):
+    content_canvas.itemconfig(main_window, width=event.width)
+
+
+main.bind("<Configure>", _on_main_configure)
+content_canvas.bind("<Configure>", _on_canvas_configure)
 
 # ======================================================
 # LEFT PANEL = USER INPUTS
@@ -314,10 +341,10 @@ canvas.create_oval(95, 85, 225, 195, width=2)
 canvas.create_text(160, 15, text="Fixture Top View")
 
 # ======================================================
-# BOTTOM BUTTONS
+# BOTTOM BUTTONS (always visible)
 # ======================================================
 bottom = tk.Frame(root, bg="#e9edf2")
-bottom.pack(fill="x", pady=8)
+bottom.grid(row=2, column=0, sticky="ew", pady=8)
 
 ttk.Button(bottom, text="Calculate Design", command=calculate_design).pack(side="left", padx=10)
 ttk.Button(bottom, text="Generate Drawing", command=generate_drawing).pack(side="left", padx=10)
