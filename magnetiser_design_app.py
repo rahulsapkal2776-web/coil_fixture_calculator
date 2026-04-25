@@ -32,6 +32,12 @@ coil_entries = {}
 cap_entries = {}
 fixture_entries = {}
 
+# Practical pulse-current baseline from shop experience:
+# 10 kA works with 12 SWG copper wire in pulse duty.
+BASELINE_CURRENT_A = 10_000
+SWG_12_DIAMETER_MM = 2.642
+SWG_12_AREA_MM2 = math.pi * (SWG_12_DIAMETER_MM / 2) ** 2
+
 
 def set_value(entry_dict, key, value):
     entry_dict[key].delete(0, tk.END)
@@ -43,6 +49,15 @@ def get_float(entry_dict, key, default=0):
         return float(entry_dict[key].get())
     except Exception:
         return default
+
+
+def calculate_conductor_sizing(peak_current_a):
+    # Scale copper area from practical baseline so heat loading stays similar.
+    required_area_mm2 = (peak_current_a / BASELINE_CURRENT_A) * SWG_12_AREA_MM2
+    eq_parallel_12swg = max(1, math.ceil(required_area_mm2 / SWG_12_AREA_MM2))
+    achieved_area_mm2 = eq_parallel_12swg * SWG_12_AREA_MM2
+    pulse_current_density = peak_current_a / achieved_area_mm2 if achieved_area_mm2 > 0 else 0
+    return required_area_mm2, eq_parallel_12swg, pulse_current_density
 
 
 def calculate_design():
@@ -92,6 +107,9 @@ def calculate_design():
 
         peak_current_a = current_ka * 1000
         ampere_turns = peak_current_a * turns
+        required_area_mm2, eq_parallel_12swg, pulse_current_density = calculate_conductor_sizing(
+            peak_current_a
+        )
 
         # Basic fixture geometry
         pole_pitch = (math.pi * od) / poles
@@ -103,12 +121,20 @@ def calculate_design():
 
         # Output fill
         set_value(coil_entries, "Recommended Turns", turns)
-        set_value(coil_entries, "Wire / Strip Size", "As per current density")
+        set_value(
+            coil_entries,
+            "Wire / Strip Size",
+            (
+                f"{round(required_area_mm2, 2)} mm² copper "
+                f"(~{eq_parallel_12swg} x 12 SWG in parallel)"
+            ),
+        )
         set_value(coil_entries, "Resistance (mΩ)", "To be calculated")
         set_value(coil_entries, "Inductance (µH)", "To be calculated")
         set_value(coil_entries, "Peak Current (kA)", current_ka)
         set_value(coil_entries, "Pulse Width (ms)", "To be tested")
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
+        set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
 
         set_value(cap_entries, "Required Energy (J)", round(required_energy, 2))
         set_value(cap_entries, "Suggested Voltage (V)", round(voltage, 2))
@@ -279,6 +305,7 @@ coil_fields = [
     "Peak Current (kA)",
     "Pulse Width (ms)",
     "Ampere Turns",
+    "Pulse Current Density (A/mm²)",
 ]
 
 for i, f in enumerate(coil_fields):
