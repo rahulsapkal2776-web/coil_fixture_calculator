@@ -96,6 +96,7 @@ def calculate_design():
         b_tesla = gauss / 10000
         pole_area_m2 = (pole_face_width_mm * height_mm) * 1e-6
         flux_per_pole_wb = b_tesla * pole_area_m2
+        flux_per_pole_gauss = (flux_per_pole_wb / pole_area_m2) * 10000 if pole_area_m2 > 0 else 0
         steel_utilization_pct = (b_tesla / 1.7) * 100 if 1.7 > 0 else 0
 
         if b_tesla > 1.7:
@@ -182,7 +183,7 @@ def calculate_design():
         # Output fill
         set_value(coil_entries, "Current (kA)", round(peak_current_a / 1000, 3))
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
-        set_value(coil_entries, "Flux per Pole (Wb)", round(flux_per_pole_wb, 6))
+        set_value(coil_entries, "Flux per Pole (Gauss)", round(flux_per_pole_gauss, 2))
         set_value(coil_entries, "Steel Utilization (%)", round(steel_utilization_pct, 1))
         set_value(coil_entries, "Recommended Wire Area (mm²)", round(wire_area_mm2, 3))
         set_value(
@@ -369,7 +370,7 @@ coil.pack(fill="x", pady=5)
 coil_fields = [
     "Current (kA)",
     "Ampere Turns",
-    "Flux per Pole (Wb)",
+    "Flux per Pole (Gauss)",
     "Steel Utilization (%)",
     "Recommended Wire Area (mm²)",
     "Recommended Wire Size",
