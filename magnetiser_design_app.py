@@ -48,19 +48,24 @@ def calculate_design():
     try:
         od = get_float(job_entries, "Magnet OD (mm)")
         id_ = get_float(job_entries, "Magnet ID (mm)")
+        height_mm = get_float(job_entries, "Height / Width (mm)", 20.0)
         poles = get_float(job_entries, "No. of Poles")
         gauss = get_float(job_entries, "Required Gauss")
+        turns_per_pole = get_float(job_entries, "Turns per Pole", 10)
+        pole_face_width_mm = get_float(job_entries, "Pole Face Width (mm)", 10)
+        pole_face_depth_mm = get_float(job_entries, "Pole Face Depth (mm)", 10)
+        magnetic_path_length_mm = get_float(job_entries, "Magnetic Path Length (mm)", 100)
+        safety_factor = get_float(job_entries, "Safety Factor", 1.3)
 
         voltage = get_float(machine_entries, "Max Voltage (V)")
         cycle_time = get_float(machine_entries, "Cycle Time (sec)")
-        wire_area_mm2 = get_float(machine_entries, "Wire / Strip Area (mm²)", 3.31)
         single_cap_uf = get_float(machine_entries, "Single Capacitor Value (µF)", 4700)
         single_cap_voltage = get_float(machine_entries, "Single Capacitor Voltage (V)", voltage)
-        height_mm = get_float(job_entries, "Height / Width (mm)", 20.0)
+        cooling_type = machine_entries["Cooling Type"].get().strip().lower()
 
-        if od <= 0 or poles <= 0 or voltage <= 0:
+        if od <= 0 or poles <= 0 or voltage <= 0 or turns_per_pole <= 0:
             messagebox.showwarning(
-                "Input Missing", "Please enter Magnet OD, No. of Poles and Max Voltage."
+                "Input Missing", "Please enter Magnet OD, No. of Poles, Turns per Pole and Max Voltage."
             )
             return
 
@@ -70,15 +75,37 @@ def calculate_design():
                 "Please enter valid single capacitor value (µF) and voltage (V).",
             )
             return
-        if cycle_time <= 0 or wire_area_mm2 <= 0:
+        if cycle_time <= 0 or magnetic_path_length_mm <= 0 or pole_face_width_mm <= 0 or height_mm <= 0:
             messagebox.showwarning(
                 "Input Missing",
-                "Please enter valid Cycle Time and Wire/Strip Area.",
+                "Please enter valid Cycle Time, Pole Width, Height, and Magnetic Path Length.",
             )
             return
 
-        # Basic estimated energy logic
-        # This is first-stage practical estimation, later we will improve with material database.
+        # -------- Magnetic-design-first approach --------
+        h_required = 200000  # A/m for ferrite
+        magnetic_path_m = magnetic_path_length_mm / 1000
+        mmf = h_required * magnetic_path_m
+        at_required_per_pole = mmf * safety_factor
+        current_a = at_required_per_pole / turns_per_pole
+        current_a = max(5000, min(30000, current_a))  # clamp 5kA..30kA
+        # Distributed winding: per-pole turns, total ampere-turns across poles
+        ampere_turns_per_pole = current_a * turns_per_pole
+        ampere_turns_total = ampere_turns_per_pole * poles
+
+        b_tesla = gauss / 10000
+        pole_area_m2 = (pole_face_width_mm * height_mm) * 1e-6
+        flux_per_pole_wb = b_tesla * pole_area_m2
+        steel_utilization_pct = (b_tesla / 1.7) * 100 if 1.7 > 0 else 0
+
+        if b_tesla > 1.7:
+            messagebox.showerror("Steel Saturation", "Increase pole area")
+            return
+
+        current_density = 10000 if "water" in cooling_type else 5000
+        wire_area_mm2 = current_a / current_density
+
+        # Basic estimated energy logic (kept for capacitor design)
         required_energy = gauss * poles * 0.65
         required_uf = (2 * required_energy / (voltage**2)) * 1_000_000
 
@@ -88,14 +115,6 @@ def calculate_design():
         parallel_strings = math.ceil(required_uf / effective_string_uf) if effective_string_uf > 0 else 0
         no_of_caps = series_per_string * parallel_strings
 
-        # Coil suggestion
-        if poles <= 4:
-            turns = 6
-        elif poles <= 12:
-            turns = 4
-        else:
-            turns = 3
-
         area_m2 = wire_area_mm2 * 1e-6
         resistivity_cu = 1.724e-8  # ohm*m
         density_cu = 8960  # kg/m³
@@ -104,7 +123,7 @@ def calculate_design():
         # Coil DC resistance estimate
         mean_diameter_mm = ((od + id_) / 2) if id_ > 0 else (od * 0.7)
         mean_turn_length_m = math.pi * mean_diameter_mm / 1000
-        total_conductor_length_m = mean_turn_length_m * turns
+        total_conductor_length_m = mean_turn_length_m * turns_per_pole
         resistance_ohm = (resistivity_cu * total_conductor_length_m / area_m2) if area_m2 > 0 else 0
         resistance_mohm = resistance_ohm * 1000
 
@@ -112,7 +131,7 @@ def calculate_design():
         mu0 = 4 * math.pi * 1e-7
         effective_length_m = max(height_mm / 1000, 0.005)
         magnetic_area_m2 = (math.pi / 4) * max((od**2) - (id_**2), od**2 * 0.25) * 1e-6
-        inductance_h = mu0 * (turns**2) * magnetic_area_m2 / effective_length_m
+        inductance_h = mu0 * (turns_per_pole**2) * magnetic_area_m2 / effective_length_m
         inductance_uh = inductance_h * 1e6
 
         # Actual pulse current and pulse width from RLC discharge
@@ -135,9 +154,9 @@ def calculate_design():
             i_peak_calc_a = voltage / resistance_ohm if resistance_ohm > 0 else 0
             pulse_width_s = 5 * tau if tau > 0 else 0.003
 
-        peak_current_a = i_peak_calc_a
+        peak_current_a = min(i_peak_calc_a, current_a)
         pulse_width_ms = pulse_width_s * 1000
-        ampere_turns = peak_current_a * turns
+        ampere_turns = peak_current_a * turns_per_pole
 
         shots_per_min = 60 / cycle_time
         duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
@@ -161,13 +180,19 @@ def calculate_design():
         fixture_id = id_ + (2 * air_gap) if id_ > 0 else 0
 
         # Output fill
-        set_value(coil_entries, "Recommended Turns", turns)
+        set_value(coil_entries, "Current (kA)", round(peak_current_a / 1000, 3))
+        set_value(coil_entries, "Ampere Turns", round(ampere_turns))
+        set_value(coil_entries, "Flux per Pole (Wb)", round(flux_per_pole_wb, 6))
+        set_value(coil_entries, "Steel Utilization (%)", round(steel_utilization_pct, 1))
+        set_value(coil_entries, "Recommended Wire Area (mm²)", round(wire_area_mm2, 3))
+        set_value(
+            coil_entries,
+            "Recommended Wire Size",
+            f"{round(wire_area_mm2, 2)} mm² ({'Water' if 'water' in cooling_type else 'Air'} cooled)",
+        )
         set_value(coil_entries, "Resistance (mΩ)", round(resistance_mohm, 4))
         set_value(coil_entries, "Inductance (µH)", round(inductance_uh, 2))
-        set_value(coil_entries, "Peak Current (kA)", round(peak_current_a / 1000, 3))
         set_value(coil_entries, "Pulse Width (ms)", round(pulse_width_ms, 3))
-        set_value(coil_entries, "Ampere Turns", round(ampere_turns))
-        set_value(coil_entries, "Copper Area Used (mm²)", round(wire_area_mm2, 2))
         set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
         set_value(coil_entries, "Duty Cycle Correction", round(duty_cycle_correction, 2))
         set_value(coil_entries, "Copper Temperature Rise (°C/min)", round(copper_temp_rise_c, 2))
@@ -294,6 +319,12 @@ job_fields = [
     "Height / Width (mm)",
     "No. of Poles",
     "Required Gauss",
+    "Turns per Pole",
+    "Pole Face Width (mm)",
+    "Pole Face Depth (mm)",
+    "Magnetic Path Length (mm)",
+    "Steel Type",
+    "Safety Factor",
 ]
 
 for i, f in enumerate(job_fields):
@@ -308,7 +339,6 @@ machine.pack(fill="x", pady=5)
 machine_fields = [
     "Max Voltage (V)",
     "Cycle Time (sec)",
-    "Wire / Strip Area (mm²)",
     "Cooling Type",
     "Single Capacitor Value (µF)",
     "Single Capacitor Voltage (V)",
@@ -321,7 +351,11 @@ for i, f in enumerate(machine_fields):
     machine_entries[f] = ent
 
 set_value(machine_entries, "Single Capacitor Value (µF)", 4700)
-set_value(machine_entries, "Wire / Strip Area (mm²)", 3.31)
+set_value(machine_entries, "Cooling Type", "Air Cooled")
+set_value(job_entries, "Magnet Type", "Ferrite")
+set_value(job_entries, "Turns per Pole", 10)
+set_value(job_entries, "Steel Type", "MS")
+set_value(job_entries, "Safety Factor", 1.3)
 
 # ======================================================
 # CENTER PANEL = AUTO CALCULATED RESULTS
@@ -333,13 +367,15 @@ coil = ttk.LabelFrame(center, text="3. Auto Coil Design Results", padding=12)
 coil.pack(fill="x", pady=5)
 
 coil_fields = [
-    "Recommended Turns",
+    "Current (kA)",
+    "Ampere Turns",
+    "Flux per Pole (Wb)",
+    "Steel Utilization (%)",
+    "Recommended Wire Area (mm²)",
+    "Recommended Wire Size",
     "Resistance (mΩ)",
     "Inductance (µH)",
-    "Peak Current (kA)",
     "Pulse Width (ms)",
-    "Ampere Turns",
-    "Copper Area Used (mm²)",
     "Pulse Current Density (A/mm²)",
     "Duty Cycle Correction",
     "Copper Temperature Rise (°C/min)",
