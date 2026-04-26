@@ -52,7 +52,6 @@ def calculate_design():
         gauss = get_float(job_entries, "Required Gauss")
 
         voltage = get_float(machine_entries, "Max Voltage (V)")
-        current_ka = get_float(machine_entries, "Max Current (kA)")
         cycle_time = get_float(machine_entries, "Cycle Time (sec)")
         wire_area_mm2 = get_float(machine_entries, "Wire / Strip Area (mm²)", 3.31)
         single_cap_uf = get_float(machine_entries, "Single Capacitor Value (µF)", 4700)
@@ -97,7 +96,6 @@ def calculate_design():
         else:
             turns = 3
 
-        max_current_a = current_ka * 1000
         area_m2 = wire_area_mm2 * 1e-6
         resistivity_cu = 1.724e-8  # ohm*m
         density_cu = 8960  # kg/m³
@@ -137,7 +135,7 @@ def calculate_design():
             i_peak_calc_a = voltage / resistance_ohm if resistance_ohm > 0 else 0
             pulse_width_s = 5 * tau if tau > 0 else 0.003
 
-        peak_current_a = min(i_peak_calc_a, max_current_a)
+        peak_current_a = i_peak_calc_a
         pulse_width_ms = pulse_width_s * 1000
         ampere_turns = peak_current_a * turns
 
@@ -290,7 +288,6 @@ application_type.current(0)
 
 job_fields = [
     "Customer Name",
-    "Part Name",
     "Magnet Type",
     "Magnet OD (mm)",
     "Magnet ID (mm)",
@@ -310,10 +307,8 @@ machine.pack(fill="x", pady=5)
 
 machine_fields = [
     "Max Voltage (V)",
-    "Max Current (kA)",
     "Cycle Time (sec)",
     "Wire / Strip Area (mm²)",
-    "Available Space (mm)",
     "Cooling Type",
     "Single Capacitor Value (µF)",
     "Single Capacitor Voltage (V)",
