@@ -97,29 +97,11 @@ def calculate_design():
         else:
             turns = 3
 
-        peak_current_a = current_ka * 1000
-        ampere_turns = peak_current_a * turns
-
-        pulse_width_ms = 3.0  # internal pulse assumption for thermal model
-        shots_per_min = 60 / cycle_time
-
-        # Duty-cycle based thermal correction (without external cooling factor)
-        duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
-        duty_reference = 0.02  # 2% pulse-duty baseline
-        thermal_index = duty_fraction
-        duty_cycle_correction = math.sqrt(max(thermal_index / duty_reference, 1.0))
-
-        # Copper temperature-rise estimate from I²R heat in copper volume
+        max_current_a = current_ka * 1000
         area_m2 = wire_area_mm2 * 1e-6
-        pulse_current_density = peak_current_a / wire_area_mm2 if wire_area_mm2 > 0 else 0
         resistivity_cu = 1.724e-8  # ohm*m
         density_cu = 8960  # kg/m³
         cp_cu = 385  # J/kgK
-        pulse_width_s = pulse_width_ms / 1000
-        j_a_m2 = peak_current_a / area_m2 if area_m2 > 0 else 0
-        power_density_w_m3 = (j_a_m2**2) * resistivity_cu
-        energy_per_min_j_m3 = power_density_w_m3 * pulse_width_s * shots_per_min
-        copper_temp_rise_c = energy_per_min_j_m3 / (density_cu * cp_cu) if area_m2 > 0 else 0
 
         # Coil DC resistance estimate
         mean_diameter_mm = ((od + id_) / 2) if id_ > 0 else (od * 0.7)
@@ -135,6 +117,43 @@ def calculate_design():
         inductance_h = mu0 * (turns**2) * magnetic_area_m2 / effective_length_m
         inductance_uh = inductance_h * 1e6
 
+        # Actual pulse current and pulse width from RLC discharge
+        capacitance_f = required_uf * 1e-6
+        alpha = resistance_ohm / (2 * inductance_h) if inductance_h > 0 else 0
+        natural_omega_sq = (1 / (inductance_h * capacitance_f)) if inductance_h > 0 and capacitance_f > 0 else 0
+        damped_omega_sq = natural_omega_sq - (alpha**2)
+
+        if damped_omega_sq > 0:
+            omega_d = math.sqrt(damped_omega_sq)
+            t_peak = math.atan(omega_d / alpha) / omega_d if alpha > 0 else (math.pi / (2 * omega_d))
+            i_peak_calc_a = (voltage / (inductance_h * omega_d)) * math.exp(-alpha * t_peak) * math.sin(
+                omega_d * t_peak
+            )
+            pulse_width_s = math.pi / omega_d  # half-cycle discharge pulse width
+        else:
+            # Overdamped fallback
+            tau = inductance_h / resistance_ohm if resistance_ohm > 0 else 0
+            t_peak = tau
+            i_peak_calc_a = voltage / resistance_ohm if resistance_ohm > 0 else 0
+            pulse_width_s = 5 * tau if tau > 0 else 0.003
+
+        peak_current_a = min(i_peak_calc_a, max_current_a)
+        pulse_width_ms = pulse_width_s * 1000
+        ampere_turns = peak_current_a * turns
+
+        shots_per_min = 60 / cycle_time
+        duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
+        duty_reference = 0.02  # 2% pulse-duty baseline
+        thermal_index = duty_fraction
+        duty_cycle_correction = math.sqrt(max(thermal_index / duty_reference, 1.0))
+
+        # Copper temperature-rise estimate from I²R heat in copper volume using actual peak current
+        pulse_current_density = peak_current_a / wire_area_mm2 if wire_area_mm2 > 0 else 0
+        j_a_m2 = peak_current_a / area_m2 if area_m2 > 0 else 0
+        power_density_w_m3 = (j_a_m2**2) * resistivity_cu
+        energy_per_min_j_m3 = power_density_w_m3 * pulse_width_s * shots_per_min
+        copper_temp_rise_c = energy_per_min_j_m3 / (density_cu * cp_cu) if area_m2 > 0 else 0
+
         # Basic fixture geometry
         pole_pitch = (math.pi * od) / poles
         pole_width = pole_pitch * 0.55
@@ -147,7 +166,8 @@ def calculate_design():
         set_value(coil_entries, "Recommended Turns", turns)
         set_value(coil_entries, "Resistance (mΩ)", round(resistance_mohm, 4))
         set_value(coil_entries, "Inductance (µH)", round(inductance_uh, 2))
-        set_value(coil_entries, "Peak Current (kA)", current_ka)
+        set_value(coil_entries, "Peak Current (kA)", round(peak_current_a / 1000, 3))
+        set_value(coil_entries, "Pulse Width (ms)", round(pulse_width_ms, 3))
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
         set_value(coil_entries, "Copper Area Used (mm²)", round(wire_area_mm2, 2))
         set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
@@ -322,6 +342,7 @@ coil_fields = [
     "Resistance (mΩ)",
     "Inductance (µH)",
     "Peak Current (kA)",
+    "Pulse Width (ms)",
     "Ampere Turns",
     "Copper Area Used (mm²)",
     "Pulse Current Density (A/mm²)",
