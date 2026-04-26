@@ -44,48 +44,6 @@ def get_float(entry_dict, key, default=0):
         return default
 
 
-def suggest_conductor_size(current_ka):
-    current_a = current_ka * 1000
-
-    # Base practical rule:
-    # 100A pulse = 20 SWG copper
-    base_current = 100
-    base_area = 0.518  # mm² (20 SWG)
-
-    required_area = (current_a / base_current) * base_area
-
-    swg_table = [
-        ("20 SWG", 0.518),
-        ("18 SWG", 0.823),
-        ("16 SWG", 1.31),
-        ("14 SWG", 2.08),
-        ("12 SWG", 3.31),
-        ("10 SWG", 5.26),
-        ("8 SWG", 8.37),
-        ("6 SWG", 13.30),
-        ("4 SWG", 21.15),
-        ("2 SWG", 33.63),
-        ("0 SWG", 53.50),
-    ]
-
-    # Single wire option
-    for swg, area in swg_table:
-        if area >= required_area:
-            return f"{swg} Cu Wire / {round(area, 2)} mm²", required_area, area
-
-    # Multi wire / strip options
-    if required_area <= 80:
-        return f"Copper Strip 25 x {round(required_area / 25, 2)} mm", required_area, required_area
-    if required_area <= 150:
-        return f"Copper Strip 40 x {round(required_area / 40, 2)} mm", required_area, required_area
-
-    return (
-        f"2 Parallel Copper Strips / Total {round(required_area, 1)} mm²",
-        required_area,
-        required_area,
-    )
-
-
 def calculate_design():
     try:
         od = get_float(job_entries, "Magnet OD (mm)")
@@ -98,9 +56,10 @@ def calculate_design():
         cycle_time = get_float(machine_entries, "Cycle Time (sec)")
         pulse_width_ms = get_float(machine_entries, "Pulse Width (ms)", 3.0)
         shots_per_min = get_float(machine_entries, "Shots per Minute", 10.0)
-        cooling_factor = get_float(machine_entries, "Cooling Factor", 1.0)
+        wire_area_mm2 = get_float(machine_entries, "Wire / Strip Area (mm²)", 3.31)
         single_cap_uf = get_float(machine_entries, "Single Capacitor Value (µF)", 4700)
         single_cap_voltage = get_float(machine_entries, "Single Capacitor Voltage (V)", voltage)
+        height_mm = get_float(job_entries, "Height / Width (mm)", 20.0)
 
         if od <= 0 or poles <= 0 or voltage <= 0:
             messagebox.showwarning(
@@ -114,10 +73,10 @@ def calculate_design():
                 "Please enter valid single capacitor value (µF) and voltage (V).",
             )
             return
-        if pulse_width_ms <= 0 or shots_per_min <= 0 or cooling_factor <= 0:
+        if pulse_width_ms <= 0 or shots_per_min <= 0 or wire_area_mm2 <= 0:
             messagebox.showwarning(
                 "Input Missing",
-                "Please enter valid Pulse Width, Shots per Minute and Cooling Factor.",
+                "Please enter valid Pulse Width, Shots per Minute and Wire/Strip Area.",
             )
             return
 
@@ -143,16 +102,37 @@ def calculate_design():
         peak_current_a = current_ka * 1000
         ampere_turns = peak_current_a * turns
 
-        # Duty-cycle based thermal correction
+        # Duty-cycle based thermal correction (without external cooling factor)
         duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
         duty_reference = 0.02  # 2% pulse-duty baseline
-        thermal_index = duty_fraction / max(cooling_factor, 0.1)
+        thermal_index = duty_fraction
         duty_cycle_correction = math.sqrt(max(thermal_index / duty_reference, 1.0))
-        corrected_current_ka = current_ka * duty_cycle_correction
 
-        wire_size_text, required_area_mm2, selected_area_mm2 = suggest_conductor_size(corrected_current_ka)
-        pulse_current_density = peak_current_a / selected_area_mm2 if selected_area_mm2 > 0 else 0
-        copper_temp_rise_c = 35 * max(thermal_index / duty_reference, 0.2)
+        # Copper temperature-rise estimate from I²R heat in copper volume
+        area_m2 = wire_area_mm2 * 1e-6
+        pulse_current_density = peak_current_a / wire_area_mm2 if wire_area_mm2 > 0 else 0
+        resistivity_cu = 1.724e-8  # ohm*m
+        density_cu = 8960  # kg/m³
+        cp_cu = 385  # J/kgK
+        pulse_width_s = pulse_width_ms / 1000
+        j_a_m2 = peak_current_a / area_m2 if area_m2 > 0 else 0
+        power_density_w_m3 = (j_a_m2**2) * resistivity_cu
+        energy_per_min_j_m3 = power_density_w_m3 * pulse_width_s * shots_per_min
+        copper_temp_rise_c = energy_per_min_j_m3 / (density_cu * cp_cu) if area_m2 > 0 else 0
+
+        # Coil DC resistance estimate
+        mean_diameter_mm = ((od + id_) / 2) if id_ > 0 else (od * 0.7)
+        mean_turn_length_m = math.pi * mean_diameter_mm / 1000
+        total_conductor_length_m = mean_turn_length_m * turns
+        resistance_ohm = (resistivity_cu * total_conductor_length_m / area_m2) if area_m2 > 0 else 0
+        resistance_mohm = resistance_ohm * 1000
+
+        # Coil inductance estimate (single-layer equivalent, first-stage)
+        mu0 = 4 * math.pi * 1e-7
+        effective_length_m = max(height_mm / 1000, 0.005)
+        magnetic_area_m2 = (math.pi / 4) * max((od**2) - (id_**2), od**2 * 0.25) * 1e-6
+        inductance_h = mu0 * (turns**2) * magnetic_area_m2 / effective_length_m
+        inductance_uh = inductance_h * 1e6
 
         # Basic fixture geometry
         pole_pitch = (math.pi * od) / poles
@@ -164,18 +144,16 @@ def calculate_design():
 
         # Output fill
         set_value(coil_entries, "Recommended Turns", turns)
-        set_value(coil_entries, "Wire / Strip Size", wire_size_text)
-        set_value(coil_entries, "Resistance (mΩ)", "To be calculated")
-        set_value(coil_entries, "Inductance (µH)", "To be calculated")
+        set_value(coil_entries, "Resistance (mΩ)", round(resistance_mohm, 4))
+        set_value(coil_entries, "Inductance (µH)", round(inductance_uh, 2))
         set_value(coil_entries, "Peak Current (kA)", current_ka)
         set_value(coil_entries, "Pulse Width (ms)", round(pulse_width_ms, 2))
         set_value(coil_entries, "Shots per Minute", round(shots_per_min, 2))
-        set_value(coil_entries, "Cooling Factor", round(cooling_factor, 2))
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
-        set_value(coil_entries, "Required Conductor Area (mm²)", round(required_area_mm2, 2))
+        set_value(coil_entries, "Copper Area Used (mm²)", round(wire_area_mm2, 2))
         set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
         set_value(coil_entries, "Duty Cycle Correction", round(duty_cycle_correction, 2))
-        set_value(coil_entries, "Copper Temperature Rise (°C)", round(copper_temp_rise_c, 1))
+        set_value(coil_entries, "Copper Temperature Rise (°C/min)", round(copper_temp_rise_c, 2))
 
         set_value(cap_entries, "Required Energy (J)", round(required_energy, 2))
         set_value(cap_entries, "Suggested Voltage (V)", round(voltage, 2))
@@ -317,7 +295,7 @@ machine_fields = [
     "Cycle Time (sec)",
     "Pulse Width (ms)",
     "Shots per Minute",
-    "Cooling Factor",
+    "Wire / Strip Area (mm²)",
     "Available Space (mm)",
     "Cooling Type",
     "Single Capacitor Value (µF)",
@@ -331,6 +309,7 @@ for i, f in enumerate(machine_fields):
     machine_entries[f] = ent
 
 set_value(machine_entries, "Single Capacitor Value (µF)", 4700)
+set_value(machine_entries, "Wire / Strip Area (mm²)", 3.31)
 
 # ======================================================
 # CENTER PANEL = AUTO CALCULATED RESULTS
@@ -343,18 +322,16 @@ coil.pack(fill="x", pady=5)
 
 coil_fields = [
     "Recommended Turns",
-    "Wire / Strip Size",
     "Resistance (mΩ)",
     "Inductance (µH)",
     "Peak Current (kA)",
     "Pulse Width (ms)",
     "Shots per Minute",
-    "Cooling Factor",
     "Ampere Turns",
-    "Required Conductor Area (mm²)",
+    "Copper Area Used (mm²)",
     "Pulse Current Density (A/mm²)",
     "Duty Cycle Correction",
-    "Copper Temperature Rise (°C)",
+    "Copper Temperature Rise (°C/min)",
 ]
 
 for i, f in enumerate(coil_fields):
