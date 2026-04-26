@@ -54,8 +54,6 @@ def calculate_design():
         voltage = get_float(machine_entries, "Max Voltage (V)")
         current_ka = get_float(machine_entries, "Max Current (kA)")
         cycle_time = get_float(machine_entries, "Cycle Time (sec)")
-        pulse_width_ms = get_float(machine_entries, "Pulse Width (ms)", 3.0)
-        shots_per_min = get_float(machine_entries, "Shots per Minute", 10.0)
         wire_area_mm2 = get_float(machine_entries, "Wire / Strip Area (mm²)", 3.31)
         single_cap_uf = get_float(machine_entries, "Single Capacitor Value (µF)", 4700)
         single_cap_voltage = get_float(machine_entries, "Single Capacitor Voltage (V)", voltage)
@@ -73,10 +71,10 @@ def calculate_design():
                 "Please enter valid single capacitor value (µF) and voltage (V).",
             )
             return
-        if pulse_width_ms <= 0 or shots_per_min <= 0 or wire_area_mm2 <= 0:
+        if cycle_time <= 0 or wire_area_mm2 <= 0:
             messagebox.showwarning(
                 "Input Missing",
-                "Please enter valid Pulse Width, Shots per Minute and Wire/Strip Area.",
+                "Please enter valid Cycle Time and Wire/Strip Area.",
             )
             return
 
@@ -101,6 +99,9 @@ def calculate_design():
 
         peak_current_a = current_ka * 1000
         ampere_turns = peak_current_a * turns
+
+        pulse_width_ms = 3.0  # internal pulse assumption for thermal model
+        shots_per_min = 60 / cycle_time
 
         # Duty-cycle based thermal correction (without external cooling factor)
         duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
@@ -147,8 +148,6 @@ def calculate_design():
         set_value(coil_entries, "Resistance (mΩ)", round(resistance_mohm, 4))
         set_value(coil_entries, "Inductance (µH)", round(inductance_uh, 2))
         set_value(coil_entries, "Peak Current (kA)", current_ka)
-        set_value(coil_entries, "Pulse Width (ms)", round(pulse_width_ms, 2))
-        set_value(coil_entries, "Shots per Minute", round(shots_per_min, 2))
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
         set_value(coil_entries, "Copper Area Used (mm²)", round(wire_area_mm2, 2))
         set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
@@ -293,8 +292,6 @@ machine_fields = [
     "Max Voltage (V)",
     "Max Current (kA)",
     "Cycle Time (sec)",
-    "Pulse Width (ms)",
-    "Shots per Minute",
     "Wire / Strip Area (mm²)",
     "Available Space (mm)",
     "Cooling Type",
@@ -325,8 +322,6 @@ coil_fields = [
     "Resistance (mΩ)",
     "Inductance (µH)",
     "Peak Current (kA)",
-    "Pulse Width (ms)",
-    "Shots per Minute",
     "Ampere Turns",
     "Copper Area Used (mm²)",
     "Pulse Current Density (A/mm²)",
