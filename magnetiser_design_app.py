@@ -157,9 +157,17 @@ def calculate_design():
         pulse_width_ms = pulse_width_s * 1000
         ampere_turns = peak_current_a * turns_per_pole
 
-        # Flux generated at pole from NI / air-gap relation
-        g = 0.0002  # air gap in meter
-        b_generated_t = (mu0 * turns_per_pole * peak_current_a) / g if g > 0 else 0
+        # Flux generated at pole from magnetizing force H (ferrite-realistic B-H approximation)
+        path_length_m = magnetic_path_m if magnetic_path_m > 0 else 0.001
+        h_generated = (turns_per_pole * peak_current_a) / path_length_m
+
+        if h_generated < 50000:
+            b_generated_t = mu0 * h_generated
+        elif h_generated < 150000:
+            b_generated_t = 0.2 + (h_generated - 50000) * 0.000002
+        else:
+            b_generated_t = 0.45  # ferrite saturation region
+
         flux_generated_wb = b_generated_t * pole_area_m2
         generated_flux_gauss_per_pole = b_generated_t * 10000
         required_ms_area_mm2 = (flux_generated_wb / 1.7) * 1e6 if 1.7 > 0 else 0
