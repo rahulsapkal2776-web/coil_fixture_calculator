@@ -96,8 +96,8 @@ def calculate_design():
         b_tesla = gauss / 10000
         pole_area_m2 = (pole_face_width_mm * height_mm) * 1e-6
         flux_per_pole_wb = b_tesla * pole_area_m2
-        flux_per_pole_gauss = (flux_per_pole_wb / pole_area_m2) * 10000 if pole_area_m2 > 0 else 0
-        steel_utilization_pct = (b_tesla / 1.7) * 100 if 1.7 > 0 else 0
+        generated_flux_gauss_per_pole = (flux_per_pole_wb / pole_area_m2) * 10000 if pole_area_m2 > 0 else 0
+        required_ms_area_mm2 = (flux_per_pole_wb / 1.7) * 1e6 if 1.7 > 0 else 0
 
         if b_tesla > 1.7:
             messagebox.showerror("Steel Saturation", "Increase pole area")
@@ -163,7 +163,6 @@ def calculate_design():
         duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
         duty_reference = 0.02  # 2% pulse-duty baseline
         thermal_index = duty_fraction
-        duty_cycle_correction = math.sqrt(max(thermal_index / duty_reference, 1.0))
 
         # Copper temperature-rise estimate from I²R heat in copper volume using actual peak current
         pulse_current_density = peak_current_a / wire_area_mm2 if wire_area_mm2 > 0 else 0
@@ -183,19 +182,12 @@ def calculate_design():
         # Output fill
         set_value(coil_entries, "Current (kA)", round(peak_current_a / 1000, 3))
         set_value(coil_entries, "Ampere Turns", round(ampere_turns))
-        set_value(coil_entries, "Flux per Pole (Gauss)", round(flux_per_pole_gauss, 2))
-        set_value(coil_entries, "Steel Utilization (%)", round(steel_utilization_pct, 1))
-        set_value(coil_entries, "Recommended Wire Area (mm²)", round(wire_area_mm2, 3))
-        set_value(
-            coil_entries,
-            "Recommended Wire Size",
-            f"{round(wire_area_mm2, 2)} mm² ({'Water' if 'water' in cooling_type else 'Air'} cooled)",
-        )
+        set_value(coil_entries, "Generated Flux per Pole (Gauss)", round(generated_flux_gauss_per_pole, 2))
+        set_value(coil_entries, "Required MS Area (mm²)", round(required_ms_area_mm2, 2))
         set_value(coil_entries, "Resistance (mΩ)", round(resistance_mohm, 4))
         set_value(coil_entries, "Inductance (µH)", round(inductance_uh, 2))
         set_value(coil_entries, "Pulse Width (ms)", round(pulse_width_ms, 3))
         set_value(coil_entries, "Pulse Current Density (A/mm²)", round(pulse_current_density, 1))
-        set_value(coil_entries, "Duty Cycle Correction", round(duty_cycle_correction, 2))
         set_value(coil_entries, "Copper Temperature Rise (°C/min)", round(copper_temp_rise_c, 2))
 
         set_value(cap_entries, "Required Energy (J)", round(required_energy, 2))
@@ -370,15 +362,12 @@ coil.pack(fill="x", pady=5)
 coil_fields = [
     "Current (kA)",
     "Ampere Turns",
-    "Flux per Pole (Gauss)",
-    "Steel Utilization (%)",
-    "Recommended Wire Area (mm²)",
-    "Recommended Wire Size",
+    "Generated Flux per Pole (Gauss)",
+    "Required MS Area (mm²)",
     "Resistance (mΩ)",
     "Inductance (µH)",
     "Pulse Width (ms)",
     "Pulse Current Density (A/mm²)",
-    "Duty Cycle Correction",
     "Copper Temperature Rise (°C/min)",
 ]
 
