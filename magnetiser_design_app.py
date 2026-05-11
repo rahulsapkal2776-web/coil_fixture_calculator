@@ -95,9 +95,7 @@ def calculate_design():
 
         b_tesla = gauss / 10000
         pole_area_m2 = (pole_face_width_mm * height_mm) * 1e-6
-        flux_per_pole_wb = b_tesla * pole_area_m2
-        generated_flux_gauss_per_pole = (flux_per_pole_wb / pole_area_m2) * 10000 if pole_area_m2 > 0 else 0
-        required_ms_area_mm2 = (flux_per_pole_wb / 1.7) * 1e6 if 1.7 > 0 else 0
+        flux_required_wb = b_tesla * pole_area_m2
 
         if b_tesla > 1.7:
             messagebox.showerror("Steel Saturation", "Increase pole area")
@@ -158,6 +156,13 @@ def calculate_design():
         peak_current_a = min(i_peak_calc_a, current_a)
         pulse_width_ms = pulse_width_s * 1000
         ampere_turns = peak_current_a * turns_per_pole
+
+        # Flux generated at pole from NI / air-gap relation
+        g = 0.0002  # air gap in meter
+        b_generated_t = (mu0 * turns_per_pole * peak_current_a) / g if g > 0 else 0
+        flux_generated_wb = b_generated_t * pole_area_m2
+        generated_flux_gauss_per_pole = b_generated_t * 10000
+        required_ms_area_mm2 = (flux_generated_wb / 1.7) * 1e6 if 1.7 > 0 else 0
 
         shots_per_min = 60 / cycle_time
         duty_fraction = ((pulse_width_ms / 1000) * shots_per_min) / 60
